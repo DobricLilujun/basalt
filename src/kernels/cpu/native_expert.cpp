@@ -12,6 +12,10 @@
 
 #include "basalt/ggml/ggml.h"
 
+#if !defined(__x86_64__)
+extern "C" void quantize_row_q8_K(const float* x, void* y, int64_t k);   // the plain-C build (ggml_cpu_dots_arm.c)
+#endif
+
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -138,11 +142,15 @@ bool native_fmt(int gu_type, int d_type, int64_t n_embd, int64_t n_ff, NativeFmt
 void native_quant_act(const NativeFmt& f, const float* x, void* dst) {
     static const bool avx512 = cpu_avx512_ok();
     if (f.gu_act == GGML_TYPE_Q8_K) {   // ggml's reference quantizer is scalar
+#if defined(__x86_64__)
         if (avx512) {
             quantize_q8_K_avx512(x, dst, f.n_embd);
             return;
         }
         quantize_q8_K_avx2(x, dst, f.n_embd);   // the engine runs on AVX2 CPUs at least
+#else
+        quantize_row_q8_K(x, dst, f.n_embd);   // the plain-C build (ggml_cpu_dots_arm.c), declared in ggml.h
+#endif
         return;
     }
     traits(f.gu_act)->from_float(x, dst, f.n_embd);

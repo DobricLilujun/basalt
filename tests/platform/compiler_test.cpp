@@ -20,6 +20,10 @@ void check(bool ok, const std::string& what) {
 }  // namespace
 
 int main() {
+    if (!basalt::platform::kCpuX86) {   // the cpuid/AVX spellings are x86-only; the helpers fold to their portable forms
+        std::printf("compiler: aarch64 host, the x86 checks do not apply (skipped)\n");
+        return 0;
+    }
     using namespace basalt::platform;
     unsigned r[4] = {};
     cpuid(0, 0, r);
