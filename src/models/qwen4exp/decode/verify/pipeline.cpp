@@ -8,7 +8,11 @@
 #include <algorithm>
 #include <atomic>
 #include <string>
+#if defined(__x86_64__)
+#if defined(__x86_64__)
 #include <immintrin.h>
+#endif
+#endif
 
 namespace basalt::core {
 using namespace verify_detail;
@@ -182,7 +186,7 @@ bool Verifier::run_pair(Verifier& b, int ta, const int32_t* toka, int64_t pa, co
             if (rb < 0) return false;
             b_done = rb > 0;
         }
-        _mm_pause();
+        basalt::platform::cpu_relax();
     }
     progress_at("pipelined windows: finishing the window", ta);
     return a1->run_end(outa, err) && a0->run_end(nullptr, err);

@@ -21,7 +21,7 @@
 #include <atomic>
 #include <chrono>
 #include <string>
-#include <immintrin.h>
+#include "basalt/platform/compiler.hpp"
 
 namespace basalt::core {
 using namespace verify_detail;
@@ -178,7 +178,7 @@ bool Verifier::run_slot_segs(const int* rows, const int* lens, int S, const int3
         uint32_t spins = 0;
         progress_at("verify batch: waiting for the GPU to reach layer", l);
         while (*seq < want) {
-            _mm_pause();
+            basalt::platform::cpu_relax();
             if ((++spins & 1023u) != 0) continue;
             const auto now = Clock::now();
             if (now - last_flush > std::chrono::microseconds(2000)) {
@@ -207,7 +207,7 @@ bool Verifier::run_slot_segs(const int* rows, const int* lens, int S, const int3
         } else if (pool != nullptr) pool(user, h_x_, h_ids_, R, ss_->k, h_ymiss_, l);
         progress_tick();
         std::atomic_thread_fence(std::memory_order_seq_cst);
-        _mm_sfence();
+        basalt::platform::store_fence();
         if (*(volatile uint32_t*) h_flagA_ != want) {        // the pool did not publish a plan: an empty one
             sink_.counts[0] = 0;
             sink_.counts[1] = 0;
@@ -370,7 +370,7 @@ int Verifier::batch_poll(PoolMultiFn pool, void* user, std::string& err) {
         if (pool != nullptr) pool(user, h_x_, h_ids_, S, ss_->k, h_ymiss_, lb_ + b_k_);
         progress_tick();
         std::atomic_thread_fence(std::memory_order_seq_cst);
-        _mm_sfence();
+        basalt::platform::store_fence();
         if (*(volatile uint32_t*) h_flagA_ != want) {        // the pool did not publish a plan: an empty one
             sink_.counts[0] = 0;
             sink_.counts[1] = 0;

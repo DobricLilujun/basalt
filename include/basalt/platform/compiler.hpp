@@ -7,6 +7,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstring>
 
 #if defined(__x86_64__) || defined(__i386__) || defined(_M_X64) || defined(_M_IX86)
 #define BASALT_CPU_X86 1
@@ -79,6 +80,34 @@ inline int ctz32(unsigned m) {
     return (int) i;
 #else
     return __builtin_ctz(m);
+#endif
+}
+
+/// An IEEE half (its bits) to float.
+inline float f16_round_bits(uint16_t h) {
+    const uint32_t sign = (uint32_t) (h >> 15) & 1u;
+    uint32_t exp = (h >> 10) & 0x1Fu, man = h & 0x3FFu, f;
+    if (exp == 0) {
+        if (man == 0) f = sign << 31;
+        else {
+            exp = 127 - 15 + 1;
+            while (!(man & 0x400u)) { man <<= 1; --exp; }
+            man &= 0x3FFu;
+            f = (sign << 31) | (exp << 23) | (man << 13);
+        }
+    } else if (exp == 31) f = (sign << 31) | 0x7F800000u | (man << 13);
+    else f = (sign << 31) | ((exp - 15 + 127) << 23) | (man << 13);
+    float out;
+    std::memcpy(&out, &f, 4);
+    return out;
+}
+
+/// A store fence: orders the stores before it ahead of the one after it.
+inline void store_fence() {
+#if BASALT_CPU_X86
+    _mm_sfence();
+#else
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
 #endif
 }
 

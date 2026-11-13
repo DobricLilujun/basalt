@@ -13,10 +13,39 @@
 #include <cmath>
 #include <cstring>
 #include <vector>
+#if defined(__x86_64__)
 #include <immintrin.h>
+#endif
 
 namespace basalt::core::verify_detail {
 
+#if !defined(__x86_64__)
+// aarch64: the same dot, plain C. Router rows are Q4_0-style (16 bytes per 32 weights, offset -8);
+// activations are block_q8_1: fp16 d, fp16 s, then 32 int8.
+void warm_logits(CpuWarm& c, int e0, int e1, const std::atomic<bool>& stop) {
+    const int NB = c.n_embd / 32, pt = c.n_tok;
+    const uint8_t* R = c.rq.data() + (size_t) c.layer * c.n_expert * (c.n_embd / 2);
+    const float* S = c.rs.data() + (size_t) c.layer * c.n_expert * NB;
+    for (int e = e0; e < e1; ++e) {
+        if (stop.load(std::memory_order_relaxed)) return;
+        float acc[basalt::kernels::kVerifyMaxT] = {};
+        const uint8_t* row = R + (size_t) e * (c.n_embd / 2);
+        for (int b = 0; b < NB; ++b) {
+            const float sw = S[(size_t) e * NB + b];
+            for (int j = 0; j < 32; ++j) {
+                const int w = (int) (int8_t) (j < 16 ? ((row[b * 16 + j] & 0x0F) - 8) : ((row[b * 16 + j] >> 4) - 8));
+                for (int t = 0; t < pt; ++t) {
+                    const uint8_t* blk = c.xq + ((size_t) t * NB + b) * 36;   // block_q8_1: half d, half s, 32 x int8
+                    uint16_t dh;
+                    std::memcpy(&dh, blk, 2);
+                    acc[t] += (float) w * (float) (int8_t) blk[4 + j] * sw * basalt::platform::f16_round_bits(dh);
+                }
+            }
+        }
+        for (int t = 0; t < pt; ++t) c.logits[(size_t) t * c.n_expert + e] = acc[t];
+    }
+}
+#else
 // layer `c.layer`'s router rows [e0, e1) on the job's tokens
 BASALT_TARGET_AVX2_FMA_F16C void warm_logits(CpuWarm& c, int e0, int e1, const std::atomic<bool>& stop) {
     const int NB = c.n_embd / 32, pt = c.n_tok;
@@ -54,6 +83,7 @@ BASALT_TARGET_AVX2_FMA_F16C void warm_logits(CpuWarm& c, int e0, int e1, const s
     }
 }
 
+#endif
 // every token's top k (softmax weights over them), summed per predicted expert only the CPU holds; the likeliest
 void warm_select(CpuWarm& c) {
     const int NE = c.n_expert, K = std::min(c.k, 16);
@@ -94,7 +124,7 @@ void warm_job(void* ctx, int w, int W, const std::atomic<bool>& stop) {
     } else {
         while (c.ready.load(std::memory_order_acquire) == 0) {
             if (stop.load(std::memory_order_relaxed)) return;
-            _mm_pause();
+            basalt::platform::cpu_relax();
         }
     }
     // this worker's share of the blob, one load per line: the gate and up rows first (computed first), then the down
