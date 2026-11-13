@@ -8,6 +8,8 @@
 #include "basalt/platform/compiler.hpp"
 #include <sstream>
 
+
+
 namespace basalt::kernels::cpu {
 namespace {
 ExpertLayout g_layout;
@@ -19,6 +21,7 @@ int cpu_isa_cap() { return 3; }   // no cap
 
 bool cpu_avx512_ok() {
     static const bool ok = [] {
+        if (!basalt::platform::kCpuX86) return false;              // the AVX probes are x86-only
         if (cpu_isa_cap() < 3) return false;
         unsigned r[4] = {0, 0, 0, 0};
         auto cpuid = [&](unsigned leaf, unsigned sub) { platform::cpuid(leaf, sub, r); };
@@ -39,6 +42,7 @@ bool cpu_avx512_ok() {
 
 bool cpu_avx2_ok() {
     static const bool ok = [] {
+        if (!basalt::platform::kCpuX86) return false;              // the AVX probes are x86-only
         if (cpu_isa_cap() < 2) return false;
         unsigned r[4] = {0, 0, 0, 0};
         auto cpuid = [&](unsigned leaf, unsigned sub) { platform::cpuid(leaf, sub, r); };
@@ -58,6 +62,7 @@ bool cpu_avx2_ok() {
 
 bool cpu_avxvnni_ok() {
     static const bool ok = [] {
+        if (!basalt::platform::kCpuX86) return false;              // the AVX probes are x86-only
         if (!cpu_avx2_ok()) return false;
         unsigned r[4] = {0, 0, 0, 0};
         platform::cpuid(0, 0, r);
@@ -73,6 +78,7 @@ bool cpu_avxvnni_ok() {
 
 bool cpu_avxvnni_int8_ok() {
     static const bool ok = [] {
+        if (!basalt::platform::kCpuX86) return false;              // the AVX probes are x86-only
         if (!cpu_avx2_ok()) return false;
         unsigned r[4] = {0, 0, 0, 0};
         platform::cpuid(0, 0, r);
@@ -89,6 +95,7 @@ bool cpu_avx1_ok() {
     // AVX (Sandy Bridge, 2011): AVX + OSXSAVE with the OS saving the YMM state; FMA, F16C and AVX2 not needed.
     // From the upstream fork (rwkeyes).
     static const bool ok = [] {
+        if (!basalt::platform::kCpuX86) return false;
         if (cpu_isa_cap() < 1) return false;
         unsigned r[4] = {0, 0, 0, 0};
         platform::cpuid(1, 0, r);

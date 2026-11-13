@@ -31,8 +31,10 @@ add_library(vision_core STATIC
   ${VISION_ROOT}/src/vision/mrope_positions.cpp
   ${VISION_ROOT}/src/vision/mmproj.cpp
   ${VISION_ROOT}/src/vision/encoder_cpu.cpp
-  ${VISION_ROOT}/src/vision/gemm_cpu.cpp
-  ${VISION_ROOT}/src/vision/gemm_cpu_avx512.cpp)
+  ${VISION_ROOT}/src/vision/gemm_cpu.cpp)
+if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+  target_sources(vision_core PRIVATE ${VISION_ROOT}/src/vision/gemm_cpu_avx512.cpp)
+endif()
 target_include_directories(vision_core PUBLIC ${VISION_ROOT}/include PRIVATE ${VISION_ROOT}/src/vision)
 if(MSVC)
   # /arch: selects the baseline; the intrinsics used below are available to a function that uses them either way.
@@ -40,10 +42,12 @@ if(MSVC)
   # the AVX-512 BF16 file is only called after a run-time CPU check
   set_source_files_properties(${VISION_ROOT}/src/vision/gemm_cpu_avx512.cpp PROPERTIES COMPILE_OPTIONS "/arch:AVX512")
 else()
-  set_source_files_properties(${VISION_ROOT}/src/vision/gemm_cpu.cpp PROPERTIES COMPILE_OPTIONS "-mavx2;-mfma")
-  # the AVX-512 BF16 file is only called after a run-time CPU check
-  set_source_files_properties(${VISION_ROOT}/src/vision/gemm_cpu_avx512.cpp
-                              PROPERTIES COMPILE_OPTIONS "-mavx512f;-mavx512bw;-mavx512vl;-mavx512bf16;-mfma")
+  if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+    set_source_files_properties(${VISION_ROOT}/src/vision/gemm_cpu.cpp PROPERTIES COMPILE_OPTIONS "-mavx2;-mfma")
+    # the AVX-512 BF16 file is only called after a run-time CPU check
+    set_source_files_properties(${VISION_ROOT}/src/vision/gemm_cpu_avx512.cpp
+                                PROPERTIES COMPILE_OPTIONS "-mavx512f;-mavx512bw;-mavx512vl;-mavx512bf16;-mfma")
+  endif()
 endif()
 target_link_libraries(vision_core PUBLIC model_file platform Threads::Threads)
 

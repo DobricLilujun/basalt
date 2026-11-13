@@ -25,8 +25,8 @@
 #define GGML_COMMON_IMPL_CUDA
 #include "basalt/ggml/ggml_common.h"
 
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 1200
-#error "the MMQ kernels are built for compute capability 12.0 only"
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ != 1200 && __CUDA_ARCH__ != 1100
+#error "the MMQ kernels are built for compute capability 12.0 (x86-64 hosts) or 11.0 (NVIDIA Thor) only"
 #endif
 
 #define WARP_SIZE 32

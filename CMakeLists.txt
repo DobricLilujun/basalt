@@ -1,7 +1,15 @@
 # basalt: a local inference engine for one NVIDIA GPU.
 cmake_minimum_required(VERSION 3.24)
+# the default follows the host: sm_110 on aarch64 (NVIDIA Thor), sm_120 on x86-64. It has to be set before
+# project(): CMake's own default for unset CMAKE_CUDA_ARCHITECTURES (3.18+: auto-detect or "all") would
+# otherwise win, and the host processor name is readable from the internal cache the toolchain populates.
 if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-  set(CMAKE_CUDA_ARCHITECTURES 120 CACHE STRING "CUDA architectures" FORCE)
+  execute_process(COMMAND uname -m OUTPUT_VARIABLE _basalt_uname OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64" OR (NOT CMAKE_SYSTEM_PROCESSOR AND _basalt_uname STREQUAL "aarch64"))
+    set(CMAKE_CUDA_ARCHITECTURES 110 CACHE STRING "CUDA architectures" FORCE)   # NVIDIA Thor (Blackwell, CC 11.0)
+  else()
+    set(CMAKE_CUDA_ARCHITECTURES 120 CACHE STRING "CUDA architectures" FORCE)
+  endif()
 endif()
 project(basalt VERSION 0.3.3 LANGUAGES C CXX CUDA)
 add_compile_definitions(BASALT_VERSION="${PROJECT_VERSION}")
@@ -37,11 +45,21 @@ endfunction()
 # the CUDA language gives the .cu compile rules but not the imported targets, so `CUDA::cudart` is brought in
 # explicitly for the host-side programs that call the runtime themselves
 find_package(CUDAToolkit REQUIRED)
-# One architecture only: the kernels use its instructions and nothing else is tested.
+# One architecture per host: sm_120 on x86-64 (the tested path), sm_110 on aarch64 hosts, where the only
+# Blackwell part with a CUDA 13 Linux toolkit is NVIDIA Thor (CC 11.0). The GPU kernels keep the portable
+# tensor-core family (mma.sync); the CPU kernels lose their AVX builds and take the scalar ports under
+# src/kernels/cpu/arm and the NEON ggml dots.
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+  set(_basalt_arch_want "110")
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+  set(_basalt_arch_want "120")
+else()
+  message(FATAL_ERROR "basalt builds for x86-64 (sm_120) and aarch64/NVIDIA Thor (sm_110) hosts only")
+endif()
 foreach(_a IN LISTS CMAKE_CUDA_ARCHITECTURES)
-  string(REGEX REPLACE "[-a].*$" "" _base "${_a}")     # 120-real / 120a are still 120
-  if(NOT _base STREQUAL "120")
-    message(FATAL_ERROR "CMAKE_CUDA_ARCHITECTURES is '${CMAKE_CUDA_ARCHITECTURES}': basalt builds for compute capability 12.0 only")
+  string(REGEX REPLACE "[-a].*$" "" _base "${_a}")     # 120-real / 110a are still 120 / 110
+  if(NOT _base STREQUAL _basalt_arch_want)
+    message(FATAL_ERROR "CMAKE_CUDA_ARCHITECTURES is '${CMAKE_CUDA_ARCHITECTURES}': basalt builds for compute capability 12.0 on x86-64 and 11.0 on aarch64 (NVIDIA Thor) only")
   endif()
 endforeach()
 if(CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 13.0)
@@ -1359,9 +1377,16 @@ if(BUILD_TESTING)
   basalt_cpu_test(NAME bf16_bits_test COMMAND bf16_bits_test)
 endif()
 
-add_library(kernels_cpu STATIC src/kernels/cpu/expert.cpp src/kernels/cpu/pool.cpp
-            src/kernels/cpu/cpu_quota.cpp src/kernels/cpu/expert_layout.cpp src/kernels/cpu/q2_avx2.cpp
-            src/kernels/cpu/q2_avx2_vnni.cpp)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+  add_library(kernels_cpu STATIC src/kernels/cpu/pool.cpp
+              src/kernels/cpu/cpu_quota.cpp src/kernels/cpu/expert_layout.cpp
+              src/kernels/cpu/arm/expert_scalar.cpp src/kernels/cpu/arm/quantize_helpers.cpp
+              src/kernels/cpu/arm/avx_stubs.cpp)
+else()
+  add_library(kernels_cpu STATIC src/kernels/cpu/expert.cpp src/kernels/cpu/pool.cpp
+              src/kernels/cpu/cpu_quota.cpp src/kernels/cpu/expert_layout.cpp src/kernels/cpu/q2_avx2.cpp
+              src/kernels/cpu/q2_avx2_vnni.cpp)
+endif()
 target_include_directories(kernels_cpu PUBLIC include)
 # only the kernel files get the AVX-512 / AVX2 flags; the pool and the probe run on any x86-64,
 # and the engine picks the kernels at run time (cpu_avx512_ok).
@@ -1382,6 +1407,16 @@ target_link_libraries(kernels_cpu PUBLIC Threads::Threads platform)
 add_library(ggml_quants STATIC src/kernels/cpu/ggml/ggml_quants.c)
 target_include_directories(ggml_quants PUBLIC include PRIVATE src/kernels/cpu/ggml)
 set_target_properties(ggml_quants PROPERTIES C_STANDARD 11 C_EXTENSIONS ON POSITION_INDEPENDENT_CODE ON)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+# NVIDIA Thor hosts: the ggml dot products in the NEON form (the arm build of the extracted dots file),
+# and the scalar ports of the engine's own expert kernels under src/kernels/cpu/arm.
+add_library(ggml_dots_arm OBJECT src/kernels/cpu/ggml/ggml_cpu_dots_arm.c)
+target_include_directories(ggml_dots_arm PRIVATE include src/kernels/cpu/ggml)
+target_compile_definitions(ggml_dots_arm PRIVATE ggml_get_type_traits_cpu=ggml_get_type_traits_cpu_arm)
+set_target_properties(ggml_dots_arm PROPERTIES C_STANDARD 11 C_EXTENSIONS ON POSITION_INDEPENDENT_CODE ON)
+target_sources(kernels_cpu PRIVATE src/kernels/cpu/native_expert.cpp src/kernels/cpu/ggml/ggml_cpu_dispatch.cpp
+                                         $<TARGET_OBJECTS:ggml_dots_arm>)
+else()
 # The CPU dot products are built for AVX2 and for AVX-512, each with its own name for the table lookup;
 # ggml_cpu_dispatch.cpp picks one at run time (cpu_avx512_ok / cpu_avx2_ok).
 set(_ggml_dots_avx2_flags ${_isa_avx2_flags})
@@ -1402,6 +1437,8 @@ target_sources(kernels_cpu PRIVATE src/kernels/cpu/native_expert.cpp src/kernels
                                          src/kernels/cpu/kq_avx2.cpp
                                          src/kernels/cpu/kq_avx1.cpp src/kernels/cpu/ggml/ggml_cpu_dispatch.cpp
                                          $<TARGET_OBJECTS:ggml_dots_avx2> $<TARGET_OBJECTS:ggml_dots_avx512>)
+endif()
+if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
 # the i-quant rows also use BMI2 (pdep/pext for the sign masks; cpu_avx512_ok requires it). MSVC compiles the
 # intrinsics without a switch.
 if(MSVC)
@@ -1420,6 +1457,7 @@ set_source_files_properties(src/kernels/cpu/nvfp4_avx2_vnni.cpp PROPERTIES COMPI
 set_source_files_properties(src/kernels/cpu/kq_avx2.cpp PROPERTIES COMPILE_OPTIONS "${_isa_avx2_flags}")
 # the router lookahead's AVX1 dot (called behind cpu_avx1_ok)
 set_source_files_properties(src/kernels/cpu/kq_avx1.cpp PROPERTIES COMPILE_OPTIONS "${_isa_avx1_flags}")
+endif()
 # MSVC gives the scalar F16C conversions no working code: its headers declare them nowhere, and with
 # __F16C__ defined the compiler claims the names as its own, so a definition compiled under that macro does not
 # build as written. The file below supplies the pair from the vector intrinsics, which are the same instruction,
@@ -1468,7 +1506,7 @@ target_compile_options(model_qwen4exp_moe_fused PRIVATE $<$<COMPILE_LANGUAGE:CUD
 target_link_libraries(model_qwen4exp_moe_fused PUBLIC mmq ${_gpu_runtime_target})
 target_link_libraries(model_qwen4exp_prefill PUBLIC model_qwen4exp_moe_fused)
 add_library(model_qwen4exp_fp4 STATIC src/models/qwen4exp/prefill/fp4/moe_fp4.cu)
-set_target_properties(model_qwen4exp_fp4 PROPERTIES CUDA_ARCHITECTURES 120a-real)
+set_target_properties(model_qwen4exp_fp4 PROPERTIES CUDA_ARCHITECTURES ${_basalt_arch_want}a-real)
 target_include_directories(model_qwen4exp_fp4 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(model_qwen4exp_fp4 PUBLIC mmq ${_gpu_runtime_target})
 target_link_libraries(model_qwen4exp_prefill PUBLIC model_qwen4exp_fp4)

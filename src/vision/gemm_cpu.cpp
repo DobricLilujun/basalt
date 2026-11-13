@@ -3,7 +3,9 @@
 
 #include <algorithm>
 #include <cstring>
+#if defined(__x86_64__)
 #include <immintrin.h>
+#endif
 #include <thread>
 #include <vector>
 
@@ -19,14 +21,17 @@ inline float bf16_round(float f) {
     return f;
 }
 
+#if defined(__x86_64__)
 inline float hsum(__m256 v) {
     __m128 a = _mm_add_ps(_mm256_castps256_ps128(v), _mm256_extractf128_ps(v, 1));
     a = _mm_add_ps(a, _mm_movehl_ps(a, a));
     a = _mm_add_ss(a, _mm_shuffle_ps(a, a, 1));
     return _mm_cvtss_f32(a);
 }
+#endif
 
 // Y rows [m0,m0+rows) x columns [n0, n0+4): W rows as fp32 in wf (4 x K)
+#if defined(__x86_64__)
 void tile(const float* X, const float* wf, float* Y, int m0, int rows, int n0, int ncols, int N, int K) {
     __m256 acc[4][4];
     for (auto& r : acc) for (auto& a : r) a = _mm256_setzero_ps();
@@ -46,6 +51,17 @@ void tile(const float* X, const float* wf, float* Y, int m0, int rows, int n0, i
             Y[(size_t) (m0 + i) * N + n0 + j] = s;
         }
 }
+#else
+// aarch64: the plain-C tile (the encoder's products are small; a NEON tile can follow later).
+void tile(const float* X, const float* wf, float* Y, int m0, int rows, int n0, int ncols, int N, int K) {
+    for (int i = 0; i < rows; ++i)
+        for (int j = 0; j < ncols; ++j) {
+            float s = 0.f;
+            for (int kk = 0; kk < K; ++kk) s += X[(size_t) (m0 + i) * K + kk] * wf[(size_t) j * K + kk];
+            Y[(size_t) (m0 + i) * N + n0 + j] = s;
+        }
+}
+#endif
 
 template <class LoadRow>
 void run(const float* X, float* Y, int M, int N, int K, int threads, LoadRow load) {
@@ -74,8 +90,10 @@ void run(const float* X, float* Y, int M, int N, int K, int threads, LoadRow loa
 }  // namespace
 
 void gemm_bf16w(const float* X, const uint16_t* W, float* Y, int M, int N, int K, int threads, bool round_x) {
+#if defined(__x86_64__)
     static const bool has_bf16 = cpu_has_bf16();
     if (round_x && has_bf16) { gemm_bf16_avx512(X, W, Y, M, N, K, threads); return; }
+#endif
     std::vector<float> xr;
     if (round_x) {
         xr.resize((size_t) M * K);

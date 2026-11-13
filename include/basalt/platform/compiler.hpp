@@ -1,17 +1,23 @@
 // include/basalt/platform/compiler.hpp - the compiler- and CPU-specific spellings the host code needs, behind
 // one name each, so no source file asks which compiler it is built with.
 //
-// x86-64 only: the engine's CPU kernels are AVX2 / AVX-512. Every function is inline and maps to the one instruction
-// or builtin each compiler gives for it.
+// On x86-64 every function is inline and maps to the one instruction or builtin each compiler gives for it.
+// On aarch64 (NVIDIA Thor hosts) the AVX spellings are x86-only: the intrinsics include and the CPUID spellings
+// are guarded, the probes constant-fold to false, and the portable spellings below replace them.
 #pragma once
 
 #include <cstdint>
 
+#if defined(__x86_64__) || defined(__i386__) || defined(_M_X64) || defined(_M_IX86)
+#define BASALT_CPU_X86 1
 #include <immintrin.h>
 #if defined(_MSC_VER)
 #include <intrin.h>
 #else
 #include <cpuid.h>
+#endif
+#else
+#define BASALT_CPU_X86 0
 #endif
 
 // Marks a function that uses AVX2, FMA and F16C intrinsics in a translation unit built without those flags. MSVC
@@ -24,6 +30,8 @@
 
 namespace basalt::platform {
 
+inline constexpr bool kCpuX86 = BASALT_CPU_X86 != 0;
+
 // MSVC can retain temporary stack copies for vector aggregate assignments even after inlining.
 // Field-wise assignment exposes the values to register allocation.
 #if defined(_MSC_VER) && !defined(__clang__)
@@ -32,8 +40,14 @@ inline constexpr bool kPreferMemberwiseVectorAssignment = true;
 inline constexpr bool kPreferMemberwiseVectorAssignment = false;
 #endif
 
-/// CPUID leaf `leaf`, subleaf `sub`: r[0..3] = EAX, EBX, ECX, EDX.
+/// CPUID leaf `leaf`, subleaf `sub`: r[0..3] = EAX, EBX, ECX, EDX. x86 only; callers reach it only behind
+/// the x86 feature probes.
 inline void cpuid(unsigned leaf, unsigned sub, unsigned (&r)[4]) {
+#if !BASALT_CPU_X86
+    r[0] = r[1] = r[2] = r[3] = 0;
+    (void) leaf; (void) sub;
+    return;
+#else
 #if defined(_MSC_VER)
     int x[4];
     __cpuidex(x, (int) leaf, (int) sub);
@@ -41,11 +55,14 @@ inline void cpuid(unsigned leaf, unsigned sub, unsigned (&r)[4]) {
 #else
     __cpuid_count(leaf, sub, r[0], r[1], r[2], r[3]);
 #endif
+#endif
 }
 
 /// XCR0, which says which register state the OS saves (read only after CPUID reports OSXSAVE).
 inline unsigned long long xgetbv0() {
-#if defined(_MSC_VER)
+#if !BASALT_CPU_X86
+    return 0;
+#elif defined(_MSC_VER)
     return _xgetbv(0);
 #else
     unsigned lo = 0, hi = 0;
@@ -84,7 +101,9 @@ inline float f16_round(float x) {
 
 /// Whether this CPU, and the OS saving its AVX-512 state, can run AVX512_BF16 with AVX512BW.
 inline bool cpu_has_avx512_bf16() {
-#if defined(_MSC_VER)
+#if !BASALT_CPU_X86
+    return false;
+#elif defined(_MSC_VER)
     // The same readings GCC's run-time probe takes: the OS has to save the AVX-512 state, and leaf 7 subleaf 0
     // names AVX512BW (EBX bit 30) and AVX512_BF16 (ECX bit 5).
     unsigned r[4];
