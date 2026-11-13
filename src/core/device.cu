@@ -235,9 +235,15 @@ DeviceInfo device_info(int ordinal) {
 
     // The binary holds code for one compute capability only; a card of another compute capability is refused here rather than failing
     // at its first kernel launch.
-    if (d.cc_major != 12 || d.cc_minor != 0) {
+#if defined(__aarch64__)
+    constexpr int kWantMajor = 11, kWantMinor = 0;   // NVIDIA Thor (Blackwell, CC 11.0)
+#else
+    constexpr int kWantMajor = 12, kWantMinor = 0;
+#endif
+    if (d.cc_major != kWantMajor || d.cc_minor != kWantMinor) {
         throw CudaError("device " + d.name + " reports compute capability " + std::to_string(d.cc_major) + "." +
-                            std::to_string(d.cc_minor) + "; basalt needs an NVIDIA GPU of compute capability 12.0",
+                            std::to_string(d.cc_minor) + "; this basalt build needs compute capability " +
+                            std::to_string(kWantMajor) + "." + std::to_string(kWantMinor),
                         -1);
     }
     return d;

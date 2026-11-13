@@ -25,7 +25,11 @@ static GpuCard card(int smi, const char* name, double gbps, uint64_t gib) {
     c.token = std::to_string(smi);
     c.smi = smi;
     c.name = name;
+#if defined(__aarch64__)
+    c.cc_major = 11;   // NVIDIA Thor (sm_110): the supported capability on aarch64 hosts
+#else
     c.cc_major = 12;
+#endif
     c.mem_gbps = gbps;
     c.vram = gib * GiB;
     return c;

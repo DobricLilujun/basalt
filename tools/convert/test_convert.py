@@ -512,7 +512,7 @@ class PleFp8Test(unittest.TestCase):
             path.write_bytes(struct.pack("<Q", len(hb)) + hb + data)
             ple = S.PleFp8(str(path), chunk_rows=4)
             self.assertEqual(ple.rows, 8)
-            self.assertAlmostEqual(ple.scale, float((np.uint32(0x3C23) << 16).view(np.float32)), places=9)
+            self.assertAlmostEqual(ple.scale, np.array(np.uint32(0x3C23) << 16, dtype=np.uint32).view(np.float32).item(), places=9)   # 0-d .view needs an array on every numpy
             got = b"".join(S._ple_job(j) for j in ple.jobs())
             self.assertEqual(len(got), ple.nbytes)
             want = b"".join(S.fp8_rows_to_q8_0(a, ple.scale) for a in shards)

@@ -22,6 +22,15 @@ static int g_fail = 0;
 
 static constexpr uint64_t G = 1ull << 30;
 
+// the supported compute capability of this host: sm_120 on x86-64, sm_110 on NVIDIA Thor (aarch64)
+#if defined(__aarch64__)
+static constexpr int kCcMaj = 11, kCcMin = 0;
+inline const std::string ARCH = "sm_110";
+#else
+static constexpr int kCcMaj = 12, kCcMin = 0;
+inline const std::string ARCH = "sm_120";
+#endif
+
 static GpuCard card(int smi, const char* name, int major, int minor, double gbps, uint64_t gib) {
     GpuCard c;
     c.token = std::to_string(smi);
@@ -76,7 +85,7 @@ int main() {
     }
     // A 5090 and a 5060 Ti, in nvidia-smi order.
     {
-        const std::vector<GpuCard> v = {card(0, "RTX 5090", 12, 0, 1792, 32), card(1, "RTX 5060 Ti", 12, 0, 448, 16)};
+        const std::vector<GpuCard> v = {card(0, "RTX 5090", kCcMaj, kCcMin, 1792, 32), card(1, "RTX 5060 Ti", kCcMaj, kCcMin, 448, 16)};
         GpuChoice c = pick("", v);
         CHECK_STR(cards(c), "0");
         CHECK_STR(c.warning, "GPU 1 (RTX 5060 Ti) unused; use gpu 0,1 or gpu auto");
@@ -100,13 +109,13 @@ int main() {
     }
     // The same cards with the slower one first: auto still makes the 5090 main.
     {
-        const std::vector<GpuCard> v = {card(0, "RTX 5060 Ti", 12, 0, 448, 16), card(1, "RTX 5090", 12, 0, 1792, 32)};
+        const std::vector<GpuCard> v = {card(0, "RTX 5060 Ti", kCcMaj, kCcMin, 448, 16), card(1, "RTX 5090", kCcMaj, kCcMin, 1792, 32)};
         CHECK_STR(cards(pick("auto", v)), "1,0");
         CHECK_STR(cards(pick("", v)), "0");
     }
     // Two equal 5090s: the lowest number is main.
     {
-        const std::vector<GpuCard> v = {card(0, "RTX 5090", 12, 0, 1792, 32), card(1, "RTX 5090", 12, 0, 1792, 32)};
+        const std::vector<GpuCard> v = {card(0, "RTX 5090", kCcMaj, kCcMin, 1792, 32), card(1, "RTX 5090", kCcMaj, kCcMin, 1792, 32)};
         const GpuChoice c = pick("auto", v);
         CHECK_STR(cards(c), "0,1");
         CHECK(c.notes.empty());
@@ -114,34 +123,34 @@ int main() {
     }
     // Four mixed cards, one of them not Blackwell.
     {
-        const std::vector<GpuCard> v = {card(0, "RTX 5070 Ti", 12, 0, 896, 16), card(1, "RTX 3090", 8, 6, 936, 24),
-                                        card(2, "RTX 5090", 12, 0, 1792, 32), card(3, "RTX 5060 Ti", 12, 0, 448, 16)};
+        const std::vector<GpuCard> v = {card(0, "RTX 5070 Ti", kCcMaj, kCcMin, 896, 16), card(1, "RTX 3090", 8, 6, 936, 24),
+                                        card(2, "RTX 5090", kCcMaj, kCcMin, 1792, 32), card(3, "RTX 5060 Ti", kCcMaj, kCcMin, 448, 16)};
         GpuChoice c = pick("auto", v);
         CHECK_STR(cards(c), "2,0,3");
         CHECK(c.notes.size() == 1);
-        if (c.notes.size() == 1) CHECK_STR(c.notes[0], "gpu auto: GPU 1 (RTX 3090) skipped, not sm_120");
+        if (c.notes.size() == 1) CHECK_STR(c.notes[0], std::string("gpu auto: GPU 1 (RTX 3090) skipped, not ") + ARCH);
         CHECK_STR(roles(v, c, 1), "main,expert tier,idle");
         CHECK_STR(roles(v, c, 3), "main,expert tier,expert tier");
         c = pick("", v);
         CHECK_STR(cards(c), "0");
         CHECK_STR(c.warning, "GPU 2 (RTX 5090), GPU 3 (RTX 5060 Ti) unused; use gpu 0,2,3 or gpu auto");
-        CHECK_STR(pick("1", v).error, "gpu: GPU 1 (RTX 3090) is sm_86, not sm_120");
+        CHECK_STR(pick("1", v).error, std::string("gpu: GPU 1 (RTX 3090) is sm_86, not ") + ARCH);
         CHECK_STR(cards(pick("3,2,0", v)), "3,2,0");
     }
     // A laptop's own card beside a desktop card in an enclosure: the desktop card's bandwidth makes it main; the
     // laptop card is the first visible, so it runs alone when nothing is set.
     {
-        const std::vector<GpuCard> v = {card(0, "RTX 5080 Laptop GPU", 12, 0, 896, 16), card(1, "RTX 5090", 12, 0, 1792, 32)};
+        const std::vector<GpuCard> v = {card(0, "RTX 5080 Laptop GPU", kCcMaj, kCcMin, 896, 16), card(1, "RTX 5090", kCcMaj, kCcMin, 1792, 32)};
         CHECK_STR(cards(pick("auto", v)), "1,0");
         CHECK_STR(cards(pick("", v)), "0");
         CHECK(!pick("", v).warning.empty());
         // the same bandwidth: the larger card is main
-        const std::vector<GpuCard> w = {card(0, "RTX 5070 Ti Laptop GPU", 12, 0, 896, 12), card(1, "RTX 5080", 12, 0, 896, 16)};
+        const std::vector<GpuCard> w = {card(0, "RTX 5070 Ti Laptop GPU", kCcMaj, kCcMin, 896, 12), card(1, "RTX 5080", kCcMaj, kCcMin, 896, 16)};
         CHECK_STR(cards(pick("auto", w)), "1,0");
     }
     // A first card Basalt cannot run: unset is an error that points at gpu N and auto.
     {
-        const std::vector<GpuCard> v = {card(0, "RTX 4090", 8, 9, 1008, 24), card(1, "RTX 5090", 12, 0, 1792, 32)};
+        const std::vector<GpuCard> v = {card(0, "RTX 4090", 8, 9, 1008, 24), card(1, "RTX 5090", kCcMaj, kCcMin, 1792, 32)};
         CHECK(!pick("", v).error.empty());
         CHECK_STR(cards(pick("auto", v)), "1");
         CHECK(pick("auto", v).notes.size() == 1);
@@ -160,11 +169,17 @@ int main() {
         basalt::platform::set_env("CUDA_VISIBLE_DEVICES", "1,0");
         bool known = false;
         const std::vector<GpuCard> v = visible_gpus(known);
-        CHECK(known && v.size() == 2);
-        if (v.size() == 2) {
+        // Tegra (Jetson/Thor) NVML enumerates no PCI cards, so the token mapping is only checked where the
+        // card table is known.
+        CHECK(v.size() == 2);   // the env list is read even where the card table is unknown (Tegra NVML)
+        std::printf("note: known=%d tokens=[%s,%s]\n", (int) known, v.size() > 0 ? v[0].token.c_str() : "",
+                    v.size() > 1 ? v[1].token.c_str() : "");
+        if (known && v.size() == 2) {
             CHECK_STR(v[0].token, "1");
             CHECK_STR(v[1].token, "0");
-            apply_gpus(v, pick("1", v).cards);
+            const GpuChoice pc = pick("1", v);
+            std::printf("note: pick err=%s cards=%s\n", pc.error.c_str(), cards(pc).c_str());
+            apply_gpus(v, pc.cards);
             const char* now = std::getenv("CUDA_VISIBLE_DEVICES");
             CHECK_STR(now ? now : "", "0");
             const char* order = std::getenv("CUDA_DEVICE_ORDER");
