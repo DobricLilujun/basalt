@@ -9,6 +9,19 @@ the CPU tests on each. The GPU tests and the quality gate need a card.
 | Compiler, build | GCC 13+, CMake 3.24+ | MSVC 19.44 (VS 2022), CMake 3.24+, Ninja |
 | CUDA, Python | 13, 3.10+ | 13, 3.10+ |
 
+## NVIDIA Thor (aarch64)
+
+The `thor-port` branch builds and serves on the Jetson AGX Thor (aarch64 host, CUDA 13, sm_110):
+`cmake -S . -B build-thor -DCMAKE_BUILD_TYPE=Release` (the arch default follows the host: sm_110 on
+aarch64, sm_120 on x86-64). The FP4 tensor-core paths stay sm_120a, so those layers fall through to MMQ;
+the CPU expert kernels have scalar ports and the host code compiles with `-ffp-contract=off` (the same
+bit-exactness reason as ggml on ARM). The device-planned MoE tail is off on this host - the per-layer
+host-doorbell window runs instead - and programmatic dependent launches are disabled.
+`basalt_config_thor.json` is a tested serve config; on a 132 GiB board put the whole IQ1_S expert set in
+VRAM with `--expert-cache 24576`. Qwen3.8-Flash-Next IQ1_S measures 23-25 tok/s plain decode, 33-57 tok/s
+with MTP, and 1226 t/s prefill (16k) in the standard `basalt-bench` suite. The GPU and CPU test suites
+pass (`ctest -L gpu`, `ctest -L cpu`).
+
 ## Release archives
 
 Each release carries `basalt-vX.Y.Z-linux-x64.tar.gz` and `basalt-vX.Y.Z-windows-x64.zip`: `bin/` (`basalt`, `basalt-bench`,
