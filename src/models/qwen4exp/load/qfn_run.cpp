@@ -214,12 +214,18 @@ int run_engine(Options& o, std::vector<program::GpuCard>& chosen_cards) {
     // whole point of this check.
     // ... and nothing runs on a CPU without AVX2: every CPU expert kernel is AVX2 at least (the AVX-512 ones are
     // chosen above it), and so is ggml-cpu, which the native pack's layout load initializes next.  Refused here, by name, rather than an illegal instruction in the first expert.
+#if defined(__aarch64__)
+    // NVIDIA Thor hosts: the CPU expert kernels and the ggml dots have scalar ports (src/kernels/cpu/arm,
+    // ggml_cpu_dots_arm.c); no AVX2 instruction can execute, so there is nothing to refuse.
+    (void)0;
+#else
     if (!basalt::kernels::cpu::cpu_avx2_ok()) {
         basalt::log::error("basalt generate", "this CPU (%s) does not support AVX2 with FMA and F16C, which this engine's "
                              "CPU expert kernels need",
                      basalt::kernels::cpu::cpu_name().c_str());
         return 2;
     }
+#endif
 
     std::string err;
     // Where the experts live.  The model keeps every quantized tensor in its GGUF form, so its experts run in verify

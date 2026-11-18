@@ -288,7 +288,13 @@ int Runtime::announce() {
     // forever.  Before it does, it reports what every part was doing (stall_report), so one occurrence says where
     // the wait is.
     {
+#if defined(__aarch64__)
+        // NVIDIA Thor hosts decode far slower than the cards this floor was set for; give a slow
+        // (but not hung) step room before the engine is torn down.
+        const int limit = 900;
+#else
         const int limit = 60;   // one step (a prompt layer, a verify window) takes seconds
+#endif
         if (limit > 0)
             std::thread([limit] {
                 basalt::core::Progress& p = basalt::core::progress();

@@ -24,6 +24,25 @@
 #include "basalt/platform/compiler.hpp"
 
 namespace basalt::core {
+namespace {
+constexpr int kReleaseWait =
+#if defined(__aarch64__)
+    60000;   // Thor: a released window may legitimately run long
+#else
+    5000;
+#endif
+// NVIDIA Thor hosts decode far slower than the RTX cards the engine's floor was set for
+// (20 SMs, a slower host, experts offloaded to file): keep the wait generous so a slow
+// but correct window is not mistaken for a hung one.
+constexpr auto kWindowWait = std::chrono::seconds(
+#if defined(__aarch64__)
+    600
+#else
+    20
+#endif
+);
+}  // namespace
+
 using namespace verify_detail;
 
 bool Verifier::stage_batch(const int* slots, const int* lens, int S, int hbase, const int32_t* tokens,
@@ -190,8 +209,9 @@ bool Verifier::run_slot_segs(const int* rows, const int* lens, int S, const int3
                     return false;
                 }
             }
-            if (now - a > std::chrono::seconds(20)) {
-                err = "verify batch: timed out at layer " + std::to_string(l) + released_note(release_gpu_waits(5000));
+// (aarch64: the released GPU work can legitimately run long on Thor)
+            if (now - a > kWindowWait) {
+                err = "verify batch: timed out at layer " + std::to_string(l) + released_note(release_gpu_waits(kReleaseWait));
                 return false;
             }
         }
@@ -356,8 +376,8 @@ int Verifier::batch_poll(PoolMultiFn pool, void* user, std::string& err) {
                     b_running_ = false;
                     return -1;
                 }
-                if (now - b_last_ > std::chrono::seconds(20)) {
-                    err = "verify batch: timed out at layer " + std::to_string(lb_ + b_k_) + released_note(release_gpu_waits(5000));
+                if (now - b_last_ > kWindowWait) {
+                    err = "verify batch: timed out at layer " + std::to_string(lb_ + b_k_) + released_note(release_gpu_waits(kReleaseWait));
                     b_running_ = false;
                     return -1;
                 }
@@ -388,8 +408,8 @@ int Verifier::batch_poll(PoolMultiFn pool, void* user, std::string& err) {
     }
     const cudaError_t q = cudaStreamQuery(cs_);
     if (q == cudaErrorNotReady) {
-        if (Clock::now() - b_last_ > std::chrono::seconds(20)) {
-            err = "verify batch: timed out at the window's end" + released_note(release_gpu_waits(5000));
+        if (Clock::now() - b_last_ > kWindowWait) {
+            err = "verify batch: timed out at the window's end" + released_note(release_gpu_waits(kReleaseWait));
             b_running_ = false;
             return -1;
         }

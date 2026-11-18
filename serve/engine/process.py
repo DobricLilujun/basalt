@@ -52,7 +52,10 @@ from serve.engine.progress import narrate_start, server_line, start_errors, star
 
 # A running request whose engine prints nothing for this long is out of step: the engine is ended and the request
 # fails. ProcessEngine.silence_s overrides it (0: wait forever).
-ENGINE_SILENCE_S = 300.0
+import platform as _platform
+# NVIDIA Thor hosts run a decode step far slower than the desktop cards this floor was tuned for;
+# a slow request is not a lost engine.
+ENGINE_SILENCE_S = 3600.0 if _platform.machine() == "aarch64" else 300.0
 # While a prompt is read the allowance grows: before the first PP line by the chunk's tokens at PP_FLOOR_TOK_S,
 # afterwards a chunk may take PP_SLACK x the previous one's time.
 PP_CHUNK_MAX = 32768

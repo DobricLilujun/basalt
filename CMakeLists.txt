@@ -50,6 +50,9 @@ find_package(CUDAToolkit REQUIRED)
 # tensor-core family (mma.sync); the CPU kernels lose their AVX builds and take the scalar ports under
 # src/kernels/cpu/arm and the NEON ggml dots.
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+  # the bit-exact quantizer transcriptions rely on the multiply rounding before the magic-number add:
+  # GCC on aarch64 contracts them into one FMA otherwise (llama.cpp sets the same flag for ARM).
+  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-ffp-contract=off> $<$<COMPILE_LANGUAGE:C>:-ffp-contract=off>)
   set(_basalt_arch_want "110")
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
   set(_basalt_arch_want "120")

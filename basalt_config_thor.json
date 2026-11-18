@@ -1,0 +1,20 @@
+{
+  "version": 2,
+  "models": [
+    {
+      "model": "/home/sedanrobot2/basalt-models/Qwen3.8-FN-UD-IQ1_S.basalt",
+      "gpu": "0",
+      "kv": "q4_0"
+    }
+  ],
+  "engine": {
+    "spec": 0,
+    "ram-reserve-mib": 0,
+    "max-context": 2048,
+    "engine_silence_s": 0,
+    "expert-cache": 24576
+  },
+  "server": {
+    "port": 8082
+  }
+}

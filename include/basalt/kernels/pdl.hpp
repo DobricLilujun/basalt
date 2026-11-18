@@ -13,11 +13,19 @@
 
 namespace basalt::kernels {
 
-inline constexpr bool pdl_requested() { return true; }
+inline constexpr bool pdl_requested() {
+#if defined(__aarch64__)
+    // NVIDIA Thor (Tegra): the decode chain's producer and dependent spin kernels cannot co-schedule
+    // on this part's SMs; overlapping them through griddepcontrol deadlocks the window.
+    return false;
+#else
+    return true;
+#endif
+}
 
 /// The decode chain's kernels start their dependents early (pdl_launch_dependents) and stage their first weights
 /// before pdl_wait, so each stage's weight reads begin during the previous stage's tail.
-inline constexpr bool pdl2_requested() { return true; }
+inline constexpr bool pdl2_requested() { return pdl_requested(); }
 struct PdlState {
     bool on = false;
     int plain = 0;   // launches still to go the plain way

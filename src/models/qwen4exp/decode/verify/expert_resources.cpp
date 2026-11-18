@@ -32,6 +32,11 @@ bool Verifier::dm_init(std::string& err) {
     const ModelGeometry& g = *g_;
     const auto& lay = basalt::kernels::cpu::expert_layout();
     const char* why = nullptr;
+#if defined(__aarch64__)
+    // NVIDIA Thor (Tegra): the device-planned tail's persistent plan/spin kernels never finish on this part's
+    // SMs; the host-doorbell window runs instead.  Remove this once the planner is fixed for sm_110.
+    why = "the device-planned tail is not enabled on this port (NVIDIA Thor)";
+#else
     if (!lay.native) why = "the experts are not a native pack";
     else if (all_resident_) why = "every expert is resident";
     else if (hits_.h_res == nullptr) why = "no host residency table";
@@ -40,6 +45,7 @@ bool Verifier::dm_init(std::string& err) {
         const auto& f = lay.fmt[(size_t) l];
         if (!dec_moe_formats_ok(f.gu_type, f.d_type, f.n_embd, f.n_ff, f.up_type)) why = "an expert format the kernels do not cover";
     }
+#endif
     if (why != nullptr) {
         basalt::log::warn("basalt verify", "the device-planned MoE tail is off: %s", why);
         if (route_tail_skip_ > 0) basalt::log::info("basalt verify", "route-tail-skip is off: it needs the device-planned MoE tail");

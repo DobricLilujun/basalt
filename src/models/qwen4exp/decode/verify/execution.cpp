@@ -27,6 +27,25 @@
 #include "basalt/platform/compiler.hpp"
 
 namespace basalt::core {
+namespace {
+constexpr int kReleaseWait =
+#if defined(__aarch64__)
+    60000;   // Thor: a released window may legitimately run long
+#else
+    5000;
+#endif   // ms; see kWindowWait
+// NVIDIA Thor hosts decode far slower than the RTX cards the engine's floor was set for
+// (20 SMs, a slower host, experts offloaded to file): keep the wait generous so a slow
+// but correct window is not mistaken for a hung one.
+constexpr auto kWindowWait = std::chrono::seconds(
+#if defined(__aarch64__)
+    600
+#else
+    20
+#endif
+);
+}  // namespace
+
 using namespace verify_detail;
 
 void Verifier::stage_inputs(int T, const int32_t* tokens, int64_t pos0) {
@@ -238,10 +257,11 @@ int Verifier::serve_poll(PoolMultiFn pool, void* user, std::string& err) {
                     return -1;
                 }
             }
-            if (now - fl_.wait_t0 > std::chrono::seconds(20)) {
+            if (now - fl_.wait_t0 > kWindowWait) {
                 // the caller ends the engine; no spin kernel may outlive it
+// (aarch64: the released GPU work can legitimately run long on Thor)
                 const std::string words = dm_note();   // read before the release overwrites them
-                const bool drained = release_gpu_waits(5000);
+                const bool drained = release_gpu_waits(kReleaseWait);
                 err = "verify: timed out at layer " + std::to_string(l) + words + released_note(drained) + peer_released();
                 return -1;
             }

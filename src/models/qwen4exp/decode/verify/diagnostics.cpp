@@ -38,6 +38,7 @@ void diag_active_verifier(std::FILE* f) {
 void release_live_verifiers(std::FILE* f) {
     for (auto& slot : g_live)
         if (Verifier* v = slot.load()) {
+// (aarch64: the released GPU work can legitimately run long on Thor)
             const Clock::time_point t0 = Clock::now();
             const bool done = v->release_gpu_waits(5000);
             if (f != nullptr)
@@ -106,6 +107,13 @@ std::string Verifier::dm_note() const {
              std::to_string(r.n_cpu) + ")";
     }
     s += ", host flag " + std::to_string(rd(h_flag_));
+    if (d->pdev < 0) {   // one-card port probe: the planner's window words
+        s += "; dm words:";
+        for (int wq = 0; wq < 20; ++wq) {
+            const uint32_t v = rd(d->h_w + (size_t) wq * 4);
+            if (v) s += " w" + std::to_string(wq) + "=" + std::to_string(v);
+        }
+    }
     if (d->pdev >= 0) {
         const uint32_t w = rd(d->h_w + 0), done = rd(d->h_w + 16);
         std::string st = "not launched";

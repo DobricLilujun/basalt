@@ -133,7 +133,13 @@ int cache_size(Context& context) {
         const int64_t reserve = reserve_b + ((int64_t) prefill_mib << 20) + mtp_bind + late_b;
         const int64_t blob = (int64_t) cache_slot_bytes;
         int64_t slots = ((int64_t) free_b - reserve) / blob;
+#if defined(__aarch64__)
+        // NVIDIA Thor hosts (132 GiB unified): keep the whole expert set resident in VRAM even past the
+        // model's profile; the slots the profile does not name are filled as they route (all-resident decode).
+        if (!profile.empty()) slots = std::min<int64_t>(slots, (int64_t) g.n_expert * g.n_layers);
+#else
         if (!profile.empty()) slots = std::min<int64_t>(slots, (int64_t) profile.size());
+#endif
         o.expert_cache = (int) std::max<int64_t>(slots, 0);
         // a reserve raised to hold the late room says what was asked
         const std::string raised = reserve_b > ((int64_t) o.vram_reserve_mib << 20)
