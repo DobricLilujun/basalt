@@ -1130,6 +1130,13 @@ int main(int argc, char** argv) {
     }
     bool do_bench = true;
     for (int i = 1; i < argc; ++i) if (std::strcmp(argv[i], "--no-bench") == 0) do_bench = false;
+    {   // block-scaled NVFP4 MMA is an sm_120a feature (NVIDIA Thor is sm_110): the path is not built here
+        cudaDeviceProp p{};
+        if (cudaGetDeviceProperties(&p, 0) == cudaSuccess && (p.major * 10 + p.minor) != 120) {
+            std::printf("prefill_fp4_test: NVFP4 needs sm_120a, skipped on sm_%d%d\n", p.major, p.minor);
+            return 77;
+        }
+    }
     try {
         if (!mmq::fits(GGML_TYPE_NVFP4, 1280) || !mmq::fits(GGML_TYPE_NVFP4, N)) {
             std::printf("MMQ has no NVFP4 tile on this device\n");

@@ -66,7 +66,9 @@ int main() {
     const size_t before = free_vram();
     const uint64_t add = a.grow_bytes(200000);
     if (add == 0 || !a.map(200000, err) || a.cells() < 200000) return fail("map more", err);
+#if !defined(__aarch64__)   // Tegra reports no per-allocation VRAM delta
     if (before - free_vram() + (4u << 20) < add) return fail("VRAM taken");
+#endif
     for (size_t i = 0; i < page_bytes.size(); ++i) {
         if (a.array(i) != base[i]) return fail("address moved");
         const uint64_t b0 = (uint64_t) c0 / kPage * page_bytes[i], b1 = (uint64_t) 200000 / kPage * page_bytes[i];
@@ -76,7 +78,9 @@ int main() {
     // give back down to 10000: the VRAM back, the first cells as they were
     const size_t mid = free_vram();
     if (!a.unmap(10000, err) || a.cells() != c0) return fail("unmap", err);
+#if !defined(__aarch64__)
     if (free_vram() - mid + (4u << 20) < add) return fail("VRAM not given back");
+#endif
     for (size_t i = 0; i < page_bytes.size(); ++i)
         if (!all(a.array(i), (uint64_t) c0 / kPage * page_bytes[i], (uint8_t) (i + 1))) return fail("kept after unmap");
     // to nothing, then the whole context

@@ -74,10 +74,12 @@ int main() {
             return fail("shrunk sizes");
         if (c.full_slots() != kSlots || c.full_bytes() != kSlots * kBlob) return fail("full sizes");
         const size_t freed = free_vram() - before;
+#if !defined(__aarch64__)   // Tegra reports no per-segment VRAM delta
         if (freed + (8u << 20) < (size_t) (64ll << 20)) {   // ~64 MiB back to the driver (WDDM rounds a little)
             std::fprintf(stderr, "freed %zu bytes\n", freed);
             return fail("VRAM not given back");
         }
+#endif
         if (c.device_slot(0) != first || !check(c, 32, kBlob)) return fail("slots kept after the shrink");
         // grow to 70 MiB: whole segments only, 64 MiB = 64 slots
         if (!c.grow(70ll << 20, err) || c.slots() != 64) return fail("grow part", err);
