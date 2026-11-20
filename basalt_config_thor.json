@@ -11,7 +11,7 @@
     "ram-reserve-mib": 1024,
     "max-context": 4096,
     "engine_silence_s": 0,
-    "expert-cache": 14000
+    "expert-cache": "auto"
   },
   "server": {
     "port": 8082
