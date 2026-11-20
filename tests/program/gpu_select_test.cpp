@@ -141,7 +141,9 @@ int main() {
         CHECK_STR(pick("1", v).error, std::string("gpu: GPU 1 (RTX 3090) is sm_86, not ") + ARCH);
         CHECK_STR(cards(pick("3,2,0", v)), "3,2,0");
     }
-    // An Ada (sm_89) card: never the main card; a second card only in a -DPEER_ADA=ON build
+    // An Ada (sm_89) card: never the main card; a second card only in a -DPEER_ADA=ON build.
+    // (multi-card desktop shapes: a single-SoC NVIDIA Thor host has no peer tier)
+#if !defined(__aarch64__)
     {
         const std::vector<GpuCard> v = {card(0, "RTX 5080", 12, 0, 960, 16), card(1, "RTX 4060 Ti", 8, 9, 288, 16)};
         CHECK_STR(pick("1,0", v).error, "gpu: GPU 1 (RTX 4060 Ti) is sm_89, not sm_120");
@@ -156,6 +158,7 @@ int main() {
         if (c.notes.size() == 1) CHECK_STR(c.notes[0], "gpu auto: GPU 1 (RTX 4060 Ti) skipped, not sm_120");
 #endif
     }
+#endif
     // A laptop's own card beside a desktop card in an enclosure: the desktop card's bandwidth makes it main; the
     // laptop card is the first visible, so it runs alone when nothing is set.
     {

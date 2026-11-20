@@ -137,11 +137,13 @@ bool parse_gpu_spec(const std::string& text, GpuSpec& out, std::string& err) {
 // A peer GPU runs only the expert tier's standard CUDA kernels (Q8_1/Q2_0 rows, shared-memory rings,
 // doorbells), which a build with -DPEER_ADA=ON also compiles for sm_89 (Ada).
 #if defined(__aarch64__)
+constexpr const char* kMainArch = "sm_110";
 // NVIDIA Thor hosts (Tegra): the main card is the SoC's sm_110 GPU; it runs the portable kernel family
 // (the FP4 tensor-core paths stay sm_120a and fall through to MMQ here).
 bool gpu_main_supported(const GpuCard& c) { return c.cc_major == 0 || (c.cc_major == 11 && c.cc_minor == 0); }
 #else
 bool gpu_main_supported(const GpuCard& c) { return c.cc_major == 0 || (c.cc_major == 12 && c.cc_minor == 0); }
+constexpr const char* kMainArch = "sm_120";
 #endif
 // sm_89 (Ada) is the one older architecture the peer kernels can be compiled for (when built with PEER_ADA);
 // a peer card of any other pre-Blackwell arch (or an sm_89 card without PEER_ADA) is rejected here
@@ -170,7 +172,7 @@ GpuChoice choose_gpus(const GpuSpec& spec, const std::vector<GpuCard>& visible, 
     const int n = (int) visible.size();
     auto unsupported_main = [&](int i) {
         return "gpu: " + gpu_label(visible, i) + " is sm_" + std::to_string(visible[(size_t) i].cc_major) +
-               std::to_string(visible[(size_t) i].cc_minor) + ", not sm_120";
+               std::to_string(visible[(size_t) i].cc_minor) + ", not " + kMainArch;
     };
     if (spec.kind == GpuSpec::Kind::Auto) {
         if (!known) {
@@ -183,7 +185,7 @@ GpuChoice choose_gpus(const GpuSpec& spec, const std::vector<GpuCard>& visible, 
         for (int i = 0; i < n; ++i) {
             if (gpu_main_supported(visible[(size_t) i])) main_ok.push_back(i);
             else if (gpu_peer_supported(visible[(size_t) i])) peer_ok.push_back(i);
-            else c.notes.push_back("gpu auto: " + gpu_label(visible, i) + " skipped, not sm_120");
+            else c.notes.push_back("gpu auto: " + gpu_label(visible, i) + " skipped, not " + kMainArch);
         }
         if (main_ok.empty()) {
             c.error = n == 0 ? "gpu auto: no GPU is visible" : "gpu auto: no sm_120 GPU visible";
@@ -202,7 +204,7 @@ GpuChoice choose_gpus(const GpuSpec& spec, const std::vector<GpuCard>& visible, 
         for (int i : peer_ok)
             c.cards.push_back(i);
         for (int i : peer_ok)
-            if (i != best) c.notes.push_back("gpu auto: " + gpu_label(visible, i) + " is not sm_120, using it as an expert-tier peer only");
+            if (i != best) c.notes.push_back("gpu auto: " + gpu_label(visible, i) + " is not " + kMainArch + ", using it as an expert-tier peer only");
         return c;
     }
     if (spec.kind == GpuSpec::Kind::Unset) {

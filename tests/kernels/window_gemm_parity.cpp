@@ -582,7 +582,21 @@ void bench_call(const char* name, wg::Format fmt, int64_t rows, int64_t K, bool 
 
 }  // namespace
 
+namespace {
+bool skip_without_sm120a(const char* what) {
+    int dev_ = 0;
+    cudaDeviceProp prop{};
+    if (cudaGetDevice(&dev_) == cudaSuccess && cudaGetDeviceProperties(&prop, dev_) == cudaSuccess &&
+        prop.major * 10 + prop.minor != 120) {
+        std::printf("%s: needs the sm_120a tensor-core instructions (sm_%d%d here), skipped\n", what, prop.major, prop.minor);
+        return true;
+    }
+    return false;
+}
+}  // namespace
+
 int main(int argc, char** argv) {
+    if (skip_without_sm120a("window_gemm_parity")) return 77;
     int n = 0;
     if (cudaGetDeviceCount(&n) != cudaSuccess || n == 0) return 77;
     if (argc > 1 && std::strcmp(argv[1], "--bench") == 0) {

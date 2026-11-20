@@ -44,7 +44,21 @@ void fill_x(float* d, size_t n, uint64_t seed) {
 }
 }  // namespace
 
+namespace {
+bool skip_without_sm120a(const char* what) {
+    int dev_ = 0;
+    cudaDeviceProp prop{};
+    if (cudaGetDevice(&dev_) == cudaSuccess && cudaGetDeviceProperties(&prop, dev_) == cudaSuccess &&
+        prop.major * 10 + prop.minor != 120) {
+        std::printf("%s: needs the sm_120a tensor-core instructions (sm_%d%d here), skipped\n", what, prop.major, prop.minor);
+        return true;
+    }
+    return false;
+}
+}  // namespace
+
 int main(int argc, char** argv) {
+    if (skip_without_sm120a("fp8_gemm_test")) return 77;
     int ndev = 0;
     if (cudaGetDeviceCount(&ndev) != cudaSuccess || ndev == 0) return 77;
     std::mt19937 rng(3);

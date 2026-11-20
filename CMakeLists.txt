@@ -1805,7 +1805,6 @@ target_include_directories(prefill_fp4 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/includ
 target_link_libraries(prefill_fp4 PUBLIC mmq ${_gpu_runtime_target})
 if(BASALT_MODEL_QWEN4EXP)
   target_link_libraries(model_qwen4exp_prefill PUBLIC prefill_fp4)
->>>>>>> upstream/main
 endif()
 if(BUILD_TESTING)
   if(BASALT_MODEL_QWEN4EXP)
