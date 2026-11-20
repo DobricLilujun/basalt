@@ -5,24 +5,27 @@ Settings: [configuration](configuration/index.md). Diagnostic flags: `bin/basalt
 ## Start-up
 
 The page is up at once and the model loads behind it. The header reads `Loading` with the percent over a progress bar while weights load; choosing a model in the picker loads it. `/health` and `/metrics`
-show the load. A failed start-up load ends the server. Requests wait during a load and get a 503 if it fails.
+show the load: `load.percent` and `load.gib`, the GiB placed so far in one figure over every byte the model loads (a card, a second card, RAM), where it was one figure per target. A failed start-up load ends the server. Requests wait during a load and get a 503 if it fails.
 
 ## Concurrent requests: `--parallel N`
 
 `--parallel N` (1 to 8) serves N requests at once in batch slots. Further requests wait in arrival order. `--max-context` is shared:
 each slot holds `max-context / N` tokens (`--parallel 4 --max-context 262144` gives four slots of 65,536). A request longer than its slot
-is refused with a 400 that names the length. `--slot-full-context` gives every slot the whole `--max-context`, at N times the KV cache.
+is refused with a 400 that names the length; the start log's `slots` line shows the context each slot gets. `--slot-full-context` gives every slot the whole `--max-context`, at N times the KV cache.
 
 Each slot keeps two checkpoints (end of the system prompt, last turn), so requests that share a long system prompt read it once.
+
+The engine tokenizes every prompt and matches it against what each slot holds. A reply the client sends back unchanged continues the
+slot's own tokens even when the model wrote it in other pieces than the tokenizer cuts the same bytes into (not with images).
 
 ### Session affinity
 
 With `--parallel`, a request that names its session goes to the slot that session last used, so the next turn continues the K/V already
 there. The session is the first of these headers that is set, then the request body's `session_id`: `x-llm-flow-id`,
-`x-claude-code-session-id`, `x-session-id`, `x-session-affinity`. A request with none picks a slot by the longest shared prefix, then
-the least recently used. When the session's slot is busy, the request takes that normal pick and the session's slot becomes the new
-one. Claude Code sends one `x-claude-code-session-id` for a session and its parallel subagents, so their overlapping requests spread
-over slots.
+`x-claude-code-session-id`, `x-session-id`, `x-session-affinity`, `x-grok-conv-id`, `x-grok-session-id`. A request with none picks a
+slot by the longest shared prefix, then the least recently used. When the session's slot is busy, the request takes that normal pick
+and the session's slot becomes the new one. Claude Code sends one `x-claude-code-session-id` for a session and its parallel
+subagents, so their overlapping requests spread over slots.
 
 ### Prompts beside decoding slots
 
@@ -40,12 +43,14 @@ Each request ends with one `done` line:
 ```
 
 - `pp=<prompt tokens>/<cached>c`: the rate counts newly read tokens only.
-- `acc`: drafts accepted over drafts offered. `dl`: tokens per window. Both are absent when the request did not draft.
+- `acc`: drafts accepted over drafts offered. `dl`: tokens per window, from the engine's own window count over the whole request (its solo and batch runs and every pass). With `--parallel` a window serves every busy slot in a fixed number of rows, so `dl` falls toward 1.0 as the slots fill. Both are absent when the request did not draft.
 - `end`: `stop`, `length`, `cancelled`, `disconnect` or `error`.
 - `hit`: expert cache hit rate. `pcie`: share of routed experts read over PCIe.
 
 The engine's own `basalt ...` lines go to `~/.cache/basalt/<id>/engine.log`, one folder per model file (`<id>` is 16 hex digits
-taken from the file); `[server] engine log: PATH` names it when the engine fails to start. The folder also holds the conversation
+taken from the file); `[server] engine log: PATH` names it at start. A log of 10 MiB or more moves to `engine.log.1` at the
+next start. An engine that dies of a fault or an unhandled exception writes a `basalt crash: error: ...` line (the fault, the stage
+it was in) and the server's warning quotes it with the exit status. The folder also holds the conversation
 cache. Nothing is unpacked from the model file: the server reads the tokenizer from its sections, and the engine and `basalt-vision`
 read the vision projector inside it.
 
@@ -77,8 +82,17 @@ write always leaves 4 GiB of the volume free. After a restart, a prompt that sta
 ## Sleep: `--idle-sleep`
 
 After the given seconds without requests, the engine frees its VRAM (the driver moves the GPU state to host memory). The process and its
-RAM copy of the experts stay. The next request wakes it in seconds. Linux only. The server stays awake when the GPU state would not fit in
+RAM copy of the experts stay (a dense model has no cache to give back first: the driver moves all its GPU state, both cards' on two cards). The next request wakes it in seconds. Linux only. The server stays awake when the GPU state would not fit in
 free RAM with 8 GiB to spare. `--idle-unload` ends the process instead.
+
+## Lending VRAM: `POST /v1/vram`
+
+With `--vram-elastic`, `POST /v1/vram` with `{"reserve_mib": N}` resizes the expert cache to keep N MiB free (`null`: the start's reserve).
+A resize needs a gap between requests. Idle, it applies at once and answers `200` with the new figures. While a request runs it is
+queued and answered `202 {"status": "pending"}`: it applies when the running requests have finished, and requests that arrive meanwhile
+wait for it, so steady traffic cannot hold it off. A later POST replaces a queued one (`"replaced": true`). A malformed body is a
+`400`. `GET /v1/status` shows `vram.pending` (the queued reserve, or `null`), `vram.applied` and `vram.error` (the engine refused
+the queued one).
 
 ## Memory floors
 
@@ -87,7 +101,9 @@ Basalt refuses settings that would leave the machine without memory, and never s
 - `--vram-reserve-mib` below 256 is refused on Windows and WSL2 (128 on Linux): less free VRAM makes the driver page GPU memory.
 - `--ram-reserve-mib` (default 2048) is the RAM left free for the rest of the system. The engine allocates its host buffers
   first, or holds their RAM when it page-locks them later; the expert tiers then take the free RAM less the reserve and less
-  the driver's tracking of the pages they pin (`RAM floor ...` in the start log). When some experts stay in the file, the
+  the driver's tracking of the pages they pin (`RAM floor ...` in the start log). Flash-Next's copy and top-up also leave 2 GiB beside the reserve
+  for the host memory the engine takes after they read the free RAM (CUDA graphs, the first request), so the free RAM settles
+  above the guard, not on it. When some experts stay in the file, the
   tiers also leave the OS file cache they are read through a floor: one prompt chunk's file reads and two layers' share of
   those experts, at least 4 GiB. Programs left idle beside a small reserve may be swapped out.
 - While serving, the RAM guard holds the reserve: below it, it parks conversations to disk or drops them. A request waits up to 30 s
@@ -112,12 +128,14 @@ last bits of the logits, so a greedy answer can fork after some tokens (`dynamic
 | `dynamic` | inside the engine, on the main GPU | none at rest (0.85 GiB pinned RAM) | 0.77 s / 1.45 s / 1.8 s |
 | `cpu` | sidecar on the CPU | none | about 6 s / 40 s / 70 s |
 
-`dynamic` borrows the cache's last slots per image and refills them afterwards (about 70 ms), so the cache is identical after. Which
+`dynamic` borrows the cache's last slots per image and refills them afterwards (about 70 ms), so the cache is identical after.
+Hy4-flash reads images with `dynamic` only: its main-card expert slots go back for the request's pictures and fill again as after a
+prompt. Which
 images a request may name: [image sources](configuration/image-sources.md). An image may not sit in a system prompt.
 
 ## Video
 
-With image input on, Qwen3.8-Flash-Next also reads video (DeepSeek does not). A user message names a video as it names an image, from
+With image input on, Qwen3.8-Flash-Next and Qwen3.8-27B read video (DeepSeek does not). A user message names a video as it names an image, from
 the same [sources](configuration/image-sources.md):
 
 | API | Part |
@@ -131,11 +149,11 @@ and `max_frames` (4 to 768). All frames are scaled to one size so the whole vide
 tokens), and each pair of frames is read as one picture with its time in the prompt. Audio and rotation metadata are not read: a
 phone's portrait clip arrives sideways.
 
-Decoding uses FFmpeg 6, 7 or 8 from the machine ([platforms](platforms.md#ffmpeg-for-video)). At start the server prints
+Decoding uses FFmpeg 6, 7, 8 or 9 from the machine ([platforms](platforms.md#ffmpeg-for-video)). At start the server prints
 `video  on, FFmpeg 8 (...)`, or `video  off` with the reason, and then a video is refused with that reason. A video may be 1 GiB.
 
-Frames decode on the encoder's GPU with NVDEC (H.264, HEVC, AV1, VP9 and the older codecs FFmpeg's NVDEC takes); a stream NVDEC
-refuses decodes on the CPU, with the same pixels. With `dynamic` the expert cache lends NVDEC the memory for the decode when no
+Qwen3.8-Flash-Next's frames decode on the encoder's GPU with NVDEC (H.264, HEVC, AV1, VP9 and the older codecs FFmpeg's NVDEC takes); a stream NVDEC
+refuses decodes on the CPU, with the same pixels. Qwen3.8-27B's frames always decode on the CPU. With `dynamic` the expert cache lends NVDEC the memory for the decode when no
 reply is running (tens of ms to lend and refill); beside a running reply the video decodes on the CPU, and the reply keeps going
 until the frames are encoded. Another question about the same video, in the same chat or a new one, starts from the video
 already read.

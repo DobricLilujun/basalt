@@ -8,11 +8,10 @@
     }
   ],
   "engine": {
-    "spec": 0,
-    "ram-reserve-mib": 0,
-    "max-context": 2048,
+    "ram-reserve-mib": 1024,
+    "max-context": 4096,
     "engine_silence_s": 0,
-    "expert-cache": 24576
+    "expert-cache": 14000
   },
   "server": {
     "port": 8082
